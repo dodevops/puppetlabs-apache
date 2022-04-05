@@ -11,8 +11,8 @@ class apache::version (
       if $scl_httpd_version {
         $default = $scl_httpd_version
       }
-      elsif ($::operatingsystem == 'Amazon') {
-        $default = '2.2'
+      elsif ($::operatingsystem == 'Amazon' and $::operatingsystemmajrelease == '2') {
+        $default = '2.4'
       } elsif ($::operatingsystem == 'Fedora' and versioncmp($facts['operatingsystemmajrelease'], '18') >= 0) or ($::operatingsystem != 'Fedora' and versioncmp($facts['operatingsystemmajrelease'], '7') >= 0) {
         $default = '2.4'
       } else {
@@ -20,13 +20,7 @@ class apache::version (
       }
     }
     'Debian': {
-      if $::operatingsystem == 'Ubuntu' and versioncmp($facts['operatingsystemmajrelease'], '13.10') >= 0 {
-        $default = '2.4'
-      } elsif $::operatingsystem == 'Debian' and versioncmp($facts['operatingsystemmajrelease'], '8') >= 0 {
-        $default = '2.4'
-      } else {
-        $default = '2.2'
-      }
+      $default = '2.4'
     }
     'FreeBSD': {
       $default = '2.4'

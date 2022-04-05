@@ -91,6 +91,9 @@
 #   this parameter with your SSL key's location before deploying this server in a production 
 #   environment.
 #
+# @param default_ssl_reload_on_change
+#   Enable reloading of apache if the content of ssl files have changed.
+#
 # @param default_ssl_vhost
 #   Configures a default SSL virtual host.
 #   If `true`, Puppet automatically configures the following virtual host using the 
@@ -472,6 +475,7 @@ class apache (
   $default_ssl_crl_path                                                 = undef,
   $default_ssl_crl                                                      = undef,
   $default_ssl_crl_check                                                = undef,
+  Boolean $default_ssl_reload_on_change                                 = false,
   $default_type                                                         = 'none',
   $dev_packages                                                         = $apache::params::dev_packages,
   $ip                                                                   = undef,
@@ -734,19 +738,13 @@ class apache (
     if $::osfamily == 'gentoo' {
       $error_documents_path = '/usr/share/apache2/error'
       if $default_mods =~ Array {
-        if versioncmp($apache_version, '2.4') >= 0 {
-          if defined('apache::mod::ssl') {
-            ::portage::makeconf { 'apache2_modules':
-              content => concat($default_mods, ['authz_core', 'socache_shmcb']),
-            }
-          } else {
-            ::portage::makeconf { 'apache2_modules':
-              content => concat($default_mods, 'authz_core'),
-            }
+        if defined('apache::mod::ssl') {
+          ::portage::makeconf { 'apache2_modules':
+            content => concat($default_mods, ['authz_core', 'socache_shmcb']),
           }
         } else {
           ::portage::makeconf { 'apache2_modules':
-            content => $default_mods,
+            content => concat($default_mods, 'authz_core'),
           }
         }
       }

@@ -60,7 +60,7 @@ describe 'apache::mod::ssl', type: :class do
   end
 
   context 'on a Debian OS' do
-    include_examples 'Debian 8'
+    include_examples 'Debian 11'
 
     it { is_expected.to contain_class('apache::params') }
     it { is_expected.to contain_apache__mod('ssl') }
@@ -125,6 +125,18 @@ describe 'apache::mod::ssl', type: :class do
       end
 
       it { is_expected.to contain_file('ssl.conf').with_content(%r{^  SSLCACertificateFile}) }
+    end
+
+    context 'setting ssl_cert with reload' do
+      let :params do
+        {
+          ssl_cert: '/etc/pki/some/path/localhost.crt',
+          ssl_reload_on_change: true,
+        }
+      end
+
+      it { is_expected.to contain_file('ssl.conf').with_content(%r{^  SSLCertificateFile}) }
+      it { is_expected.to contain_file('_etc_pki_some_path_localhost.crt') }
     end
 
     context 'with Apache version < 2.4 - ssl_compression with default value' do
@@ -284,6 +296,52 @@ describe 'apache::mod::ssl', type: :class do
       end
 
       it { is_expected.to contain_file('ssl.conf').with_content(%r{^  SSLProxyProtocol -ALL \+TLSv1$}) }
+    end
+
+    context 'setting ssl_honorcipherorder' do
+      context 'default value' do
+        it { is_expected.to contain_file('ssl.conf').with_content(%r{^  SSLHonorCipherOrder On$}) }
+      end
+
+      context 'force on' do
+        let :params do
+          {
+            ssl_honorcipherorder: true,
+          }
+        end
+
+        it { is_expected.to contain_file('ssl.conf').with_content(%r{^  SSLHonorCipherOrder On$}) }
+      end
+
+      context 'force off' do
+        let :params do
+          {
+            ssl_honorcipherorder: false,
+          }
+        end
+
+        it { is_expected.to contain_file('ssl.conf').with_content(%r{^  SSLHonorCipherOrder Off$}) }
+      end
+
+      context 'set on' do
+        let :params do
+          {
+            ssl_honorcipherorder: 'on',
+          }
+        end
+
+        it { is_expected.to contain_file('ssl.conf').with_content(%r{^  SSLHonorCipherOrder On$}) }
+      end
+
+      context 'set off' do
+        let :params do
+          {
+            ssl_honorcipherorder: 'off',
+          }
+        end
+
+        it { is_expected.to contain_file('ssl.conf').with_content(%r{^  SSLHonorCipherOrder Off$}) }
+      end
     end
   end
 end

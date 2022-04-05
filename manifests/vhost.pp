@@ -1221,6 +1221,8 @@
 # @param virtual_docroot
 #   Sets up a virtual host with a wildcard alias subdomain mapped to a directory with the 
 #   same name. For example, `http://example.com` would map to `/var/www/example.com`.
+#   Note that the `DocumentRoot` directive will not be present even though there is a value
+#   set for `docroot` in the manifest. See [`virtual_use_default_docroot`](#virtual_use_default_docroot) to change this behavior.
 #   ``` puppet
 #   apache::vhost { 'subdomain.loc':
 #     vhost_name      => '*',
@@ -1231,6 +1233,20 @@
 #   }
 #   ```
 # 
+# @param virtual_use_default_docroot
+#   By default, when using `virtual_docroot`, the value of `docroot` is ignored. Setting this
+#   to `true` will mean both directives will be added to the configuration.
+#   ``` puppet
+#   apache::vhost { 'subdomain.loc':
+#     vhost_name                  => '*',
+#     port                        => '80',
+#     virtual_docroot             => '/var/www/%-2+',
+#     docroot                     => '/var/www',
+#     virtual_use_default_docroot => true,
+#     serveraliases               => ['*.loc',],
+#   }
+#   ```
+#
 # @param wsgi_daemon_process
 #   Sets up a virtual host with [WSGI](https://github.com/GrahamDumpleton/mod_wsgi) alongside
 #   wsgi_daemon_process_options, wsgi_process_group, 
@@ -1343,6 +1359,11 @@
 #       { 'path'     => '/var/www/files',
 #         'provider' => 'files',
 #         'deny'     => 'from all',
+#       },
+#       { 'path'           => '/var/www/html',
+#         'provider'       => 'directory',
+#         'options'        => ['-Indexes'],
+#         'allow_override' => ['All'],
 #       },
 #     ],
 #   }
@@ -1679,6 +1700,9 @@
 # @param ssl_user_name
 #   Sets the [SSLUserName](https://httpd.apache.org/docs/current/mod/mod_ssl.html#sslusername) directive.
 #
+# @param ssl_reload_on_change
+#   Enable reloading of apache if the content of ssl files have changed.
+#
 # @param use_canonical_name
 #   Specifies whether to use the [`UseCanonicalName directive`](https://httpd.apache.org/docs/2.4/mod/core.html#usecanonicalname),
 #   which allows you to configure how the server determines it's own name and port.
@@ -1739,11 +1763,11 @@
 # @param $mdomain
 #   All the names in the list are managed as one Managed Domain (MD). mod_md will request
 #   one single certificate that is valid for all these names.
-
 define apache::vhost (
   Variant[Boolean,String] $docroot,
   $manage_docroot                                                                   = true,
   $virtual_docroot                                                                  = false,
+  $virtual_use_default_docroot                                                      = false,
   $port                                                                             = undef,
   $ip                                                                               = undef,
   Boolean $ip_based                                                                 = false,
@@ -1763,9 +1787,10 @@ define apache::vhost (
   $ssl_crl                                                                          = $apache::default_ssl_crl,
   $ssl_crl_check                                                                    = $apache::default_ssl_crl_check,
   $ssl_certs_dir                                                                    = $apache::params::ssl_certs_dir,
+  Boolean $ssl_reload_on_change                                                     = $apache::default_ssl_reload_on_change,
   $ssl_protocol                                                                     = undef,
   $ssl_cipher                                                                       = undef,
-  $ssl_honorcipherorder                                                             = undef,
+  Variant[Boolean, Enum['on', 'On', 'off', 'Off'], Undef] $ssl_honorcipherorder     = undef,
   Optional[Enum['none', 'optional', 'require', 'optional_no_ca']] $ssl_verify_client = undef,
   $ssl_verify_depth                                                                 = undef,
   Optional[Enum['none', 'optional', 'require', 'optional_no_ca']] $ssl_proxy_verify = undef,
@@ -2029,6 +2054,18 @@ define apache::vhost (
     include apache::mod::mime
   }
 
+  if $ssl_honorcipherorder =~ Boolean or $ssl_honorcipherorder == undef {
+    $_ssl_honorcipherorder = $ssl_honorcipherorder
+  } else {
+    $_ssl_honorcipherorder = $ssl_honorcipherorder ? {
+      'on'    => true,
+      'On'    => true,
+      'off'   => false,
+      'Off'   => false,
+      default => true,
+    }
+  }
+
   if $auth_kerb and $ensure == 'present' {
     include apache::mod::auth_kerb
   }
@@ -2064,6 +2101,14 @@ define apache::vhost (
     $priority_real = '25-'
   }
 
+  # https://httpd.apache.org/docs/2.4/fr/mod/core.html#servername
+  # Syntax:	ServerName [scheme://]domain-name|ip-address[:port]
+  # Sometimes, the server runs behind a device that processes SSL, such as a reverse proxy, load balancer or SSL offload
+  # appliance.
+  # When this is the case, specify the https:// scheme and the port number to which the clients connect in the ServerName
+  # directive to make sure that the server generates the correct self-referential URLs.
+  $normalized_servername = regsubst($servername, '(https?:\/\/)?([a-z0-9\/%_+.,#?!@&=-]+)(:?\d+)?', '\2', 'G')
+
   # IAC-1186: A number of configuration and log file names are generated using the $name parameter. It is possible for
   # the $name parameter to contain spaces, which could then be transferred to the log / config filenames. Although
   # POSIX compliant, this can be cumbersome.
@@ -2085,13 +2130,13 @@ define apache::vhost (
   # and use the sanitized value of $servername for default log / config filenames.
   $filename = $use_servername_for_filenames ? {
     true => $use_port_for_filenames ? {
-      true  => regsubst("${servername}-${port}", ' ', '_', 'G'),
-      false => regsubst($servername, ' ', '_', 'G'),
+      true  => regsubst("${normalized_servername}-${port}", ' ', '_', 'G'),
+      false => regsubst($normalized_servername, ' ', '_', 'G'),
     },
     false => $name,
   }
 
-  if ! $use_servername_for_filenames {
+  if ! $use_servername_for_filenames and $name != $normalized_servername {
     $use_servername_for_filenames_warn_msg = '
     It is possible for the $name parameter to be defined with spaces in it. Although supported on POSIX systems, this
     can lead to cumbersome file names. The $servername attribute has stricter conditions from Apache (i.e. no spaces)
@@ -2099,7 +2144,7 @@ define apache::vhost (
     file names.
 
     From version v7.0.0 of the puppetlabs-apache module, this parameter will default to true. From version v8.0.0 of the
-    module, the $use_servername_for_filenames will be removed and log/config file names will be dervied from the
+    module, the $use_servername_for_filenames will be removed and log/config file names will be derived from the
     sanitized $servername parameter when not explicitly defined.'
     warning($use_servername_for_filenames_warn_msg)
   } elsif ! $use_port_for_filenames {
@@ -2110,7 +2155,7 @@ define apache::vhost (
     config file names.
 
     From version v7.0.0 of the puppetlabs-apache module, this parameter will default to true. From version v8.0.0 of the
-    module, the $use_port_for_filenames will be removed and log/config file names will be dervied from the
+    module, the $use_port_for_filenames will be removed and log/config file names will be derived from the
     sanitized $servername parameter when not explicitly defined.'
     warning($use_port_for_filenames_warn_msg)
   }
@@ -2406,6 +2451,7 @@ define apache::vhost (
 
   # Template uses:
   # - $virtual_docroot
+  # - $virtual_use_default_docroot
   # - $docroot
   if $docroot {
     concat::fragment { "${name}-docroot":
@@ -2680,18 +2726,36 @@ define apache::vhost (
   # - $ssl_crl_check
   # - $ssl_protocol
   # - $ssl_cipher
-  # - $ssl_honorcipherorder
+  # - $_ssl_honorcipherorder
   # - $ssl_verify_client
   # - $ssl_verify_depth
   # - $ssl_options
   # - $ssl_openssl_conf_cmd
   # - $ssl_stapling
   # - $apache_version
-  if $ssl {
+  if $ssl and $ensure == 'present' {
     concat::fragment { "${name}-ssl":
       target  => "${priority_real}${filename}.conf",
       order   => 230,
       content => template('apache/vhost/_ssl.erb'),
+    }
+
+    if $ssl_reload_on_change {
+      [$ssl_cert, $ssl_key, $ssl_ca, $ssl_chain, $ssl_crl].each |$ssl_file| {
+        if $ssl_file {
+          include apache::mod::ssl::reload
+          $_ssl_file_copy = regsubst($ssl_file, '/', '_', 'G')
+          file { "${filename}${_ssl_file_copy}":
+            path    => "${apache::params::puppet_ssl_dir}/${filename}${_ssl_file_copy}",
+            source  => "file://${ssl_file}",
+            owner   => 'root',
+            group   => $apache::params::root_group,
+            mode    => '0640',
+            seltype => 'cert_t',
+            notify  => Class['apache::service'],
+          }
+        }
+      }
     }
   }
 

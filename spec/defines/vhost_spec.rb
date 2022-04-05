@@ -58,6 +58,7 @@ describe 'apache::vhost', type: :define do
               'docroot'                     => '/var/www/foo',
               'manage_docroot'              => false,
               'virtual_docroot'             => true,
+              'virtual_use_default_docroot' => false,
               'port'                        => '8080',
               'ip'                          => '127.0.0.1',
               'ip_based'                    => true,
@@ -71,7 +72,7 @@ describe 'apache::vhost', type: :define do
               'ssl_key'                     => '/ssl/key',
               'ssl_chain'                   => '/ssl/chain',
               'ssl_crl_path'                => '/ssl/crl',
-              'ssl_crl'                     => 'foo.crl',
+              'ssl_crl'                     => '/ssl/foo.crl',
               'ssl_certs_dir'               => '/ssl/certs',
               'ssl_protocol'                => 'SSLv2',
               'ssl_cipher'                  => 'HIGH',
@@ -88,6 +89,7 @@ describe 'apache::vhost', type: :define do
               'ssl_proxy_cipher_suite'      => 'HIGH',
               'ssl_proxy_protocol'          => 'TLSv1.2',
               'ssl_user_name'               => 'SSL_CLIENT_S_DN_CN',
+              'ssl_reload_on_change'        => true,
               'priority'                    => '30',
               'default_vhost'               => true,
               'servername'                  => 'example.com',
@@ -516,6 +518,10 @@ describe 'apache::vhost', type: :define do
               content: %r{^\s+SSLSessionCacheTimeout 300$},
             )
           }
+          it { is_expected.to contain_file('rspec.example.com_ssl_cert') }
+          it { is_expected.to contain_file('rspec.example.com_ssl_key') }
+          it { is_expected.to contain_file('rspec.example.com_ssl_chain') }
+          it { is_expected.to contain_file('rspec.example.com_ssl_foo.crl') }
           it { is_expected.to contain_class('apache::mod::mime') }
           it { is_expected.to contain_class('apache::mod::vhost_alias') }
           it { is_expected.to contain_class('apache::mod::wsgi') }
@@ -1050,6 +1056,11 @@ describe 'apache::vhost', type: :define do
           }
           it {
             is_expected.to contain_concat__fragment('rspec.example.com-ssl').with(
+              content: %r{^\s+SSLHonorCipherOrder\s+Off$},
+            )
+          }
+          it {
+            is_expected.to contain_concat__fragment('rspec.example.com-ssl').with(
               content: %r{^\s+SSLUserName\s+SSL_CLIENT_S_DN_CN$},
             )
           }
@@ -1516,6 +1527,102 @@ describe 'apache::vhost', type: :define do
             )
           }
         end
+        context 'vhost with scheme and port in servername and use_servername_for_filenames' do
+          let :params do
+            {
+              'port'                          => '80',
+              'ip'                            => '127.0.0.1',
+              'ip_based'                      => true,
+              'servername'                    => 'https://www.example.com:443',
+              'docroot'                       => '/var/www/html',
+              'add_listen'                    => true,
+              'ensure'                        => 'present',
+              'use_servername_for_filenames'  => true
+            }
+          end
+
+          it { is_expected.to compile }
+          it {
+            is_expected.to contain_concat__fragment('rspec.example.com-apache-header').with(
+              content: %r{^\s+ServerName https:\/\/www\.example\.com:443$},
+            )
+          }
+          it {
+            is_expected.to contain_concat('25-www.example.com.conf')
+          }
+        end
+        context 'vhost with scheme in servername and use_servername_for_filenames' do
+          let :params do
+            {
+              'port'                          => '80',
+              'ip'                            => '127.0.0.1',
+              'ip_based'                      => true,
+              'servername'                    => 'https://www.example.com',
+              'docroot'                       => '/var/www/html',
+              'add_listen'                    => true,
+              'ensure'                        => 'present',
+              'use_servername_for_filenames'  => true
+            }
+          end
+
+          it { is_expected.to compile }
+          it {
+            is_expected.to contain_concat__fragment('rspec.example.com-apache-header').with(
+              content: %r{^\s+ServerName https:\/\/www\.example\.com$},
+            )
+          }
+          it {
+            is_expected.to contain_concat('25-www.example.com.conf')
+          }
+        end
+        context 'vhost with port in servername and use_servername_for_filenames' do
+          let :params do
+            {
+              'port'                          => '80',
+              'ip'                            => '127.0.0.1',
+              'ip_based'                      => true,
+              'servername'                    => 'www.example.com:443',
+              'docroot'                       => '/var/www/html',
+              'add_listen'                    => true,
+              'ensure'                        => 'present',
+              'use_servername_for_filenames'  => true
+            }
+          end
+
+          it { is_expected.to compile }
+          it {
+            is_expected.to contain_concat__fragment('rspec.example.com-apache-header').with(
+              content: %r{^\s+ServerName www\.example\.com:443$},
+            )
+          }
+          it {
+            is_expected.to contain_concat('25-www.example.com.conf')
+          }
+        end
+        context 'vhost with servername and use_servername_for_filenames' do
+          let :params do
+            {
+              'port'                          => '80',
+              'ip'                            => '127.0.0.1',
+              'ip_based'                      => true,
+              'servername'                    => 'www.example.com',
+              'docroot'                       => '/var/www/html',
+              'add_listen'                    => true,
+              'ensure'                        => 'present',
+              'use_servername_for_filenames'  => true
+            }
+          end
+
+          it { is_expected.to compile }
+          it {
+            is_expected.to contain_concat__fragment('rspec.example.com-apache-header').with(
+              content: %r{^\s+ServerName www\.example\.com$},
+            )
+          }
+          it {
+            is_expected.to contain_concat('25-www.example.com.conf')
+          }
+        end
         context 'vhost with multiple ip addresses' do
           let :params do
             {
@@ -1641,6 +1748,48 @@ describe 'apache::vhost', type: :define do
           it { is_expected.not_to contain_concat__fragment('NameVirtualHost *:80') }
         end
 
+        context 'vhost with backwards compatible virtual_docroot' do
+          let :params do
+            {
+              'docroot'         => '/var/www/html',
+              'virtual_docroot' => '/var/www/sites/%0',
+            }
+          end
+
+          it { is_expected.to compile }
+          it {
+            is_expected.to contain_concat__fragment('rspec.example.com-docroot').with(
+              content: %r{^\s+VirtualDocumentRoot "/var/www/sites/%0"$},
+            )
+          }
+          it {
+            is_expected.not_to contain_concat__fragment('rspec.example.com-docroot').with(
+              content: %r{^\s+DocumentRoot "/var/www/html"$},
+            )
+          }
+        end
+        context 'vhost with virtual_docroot and docroot' do
+          let :params do
+            {
+              'docroot'                     => '/var/www/html',
+              'virtual_use_default_docroot' => true,
+              'virtual_docroot'             => '/var/www/sites/%0',
+            }
+          end
+
+          it { is_expected.to compile }
+          it {
+            is_expected.to contain_concat__fragment('rspec.example.com-docroot').with(
+              content: %r{^\s+VirtualDocumentRoot "/var/www/sites/%0"$},
+            )
+          }
+          it {
+            is_expected.to contain_concat__fragment('rspec.example.com-docroot').with(
+              content: %r{^\s+DocumentRoot "/var/www/html"$},
+            )
+          }
+        end
+
         context 'modsec_audit_log' do
           let :params do
             {
@@ -1758,6 +1907,10 @@ describe 'apache::vhost', type: :define do
           it { is_expected.not_to contain_class('apache::mod::proxy') }
           it { is_expected.not_to contain_class('apache::mod::proxy_http') }
           it { is_expected.not_to contain_class('apache::mod::headers') }
+          it { is_expected.not_to contain_file('rspec.example.com_ssl_cert') }
+          it { is_expected.not_to contain_file('rspec.example.com_ssl_key') }
+          it { is_expected.not_to contain_file('rspec.example.com_ssl_chain') }
+          it { is_expected.not_to contain_file('rspec.example.com_ssl_foo.crl') }
           it { is_expected.to contain_file('/var/www/foo') }
           it {
             is_expected.to contain_file('/tmp/logroot').with('ensure' => 'absent')
@@ -1980,6 +2133,52 @@ describe 'apache::vhost', type: :define do
           it { is_expected.to compile }
           it { is_expected.to contain_concat__fragment('rspec.example.com-ssl') }
           it { is_expected.not_to contain_concat__fragment('rspec.example.com-sslproxy') }
+        end
+        context 'ssl_honorcipherorder' do
+          let :params do
+            {
+              'docroot'            => '/rspec/docroot',
+              'ssl'                => true,
+            }
+          end
+
+          context 'ssl_honorcipherorder default' do
+            it { is_expected.to compile }
+            it { is_expected.to contain_concat__fragment('rspec.example.com-ssl').without_content(%r{^\s*SSLHonorCipherOrder}i) }
+          end
+
+          context 'ssl_honorcipherorder on' do
+            let :params do
+              super().merge({ 'ssl_honorcipherorder' => 'on' })
+            end
+
+            it { is_expected.to compile }
+            it { is_expected.to contain_concat__fragment('rspec.example.com-ssl').with_content(%r{^\s*SSLHonorCipherOrder\s+On$}) }
+          end
+          context 'ssl_honorcipherorder true' do
+            let :params do
+              super().merge({ 'ssl_honorcipherorder' => true })
+            end
+
+            it { is_expected.to compile }
+            it { is_expected.to contain_concat__fragment('rspec.example.com-ssl').with_content(%r{^\s*SSLHonorCipherOrder\s+On$}) }
+          end
+          context 'ssl_honorcipherorder off' do
+            let :params do
+              super().merge({ 'ssl_honorcipherorder' => 'off' })
+            end
+
+            it { is_expected.to compile }
+            it { is_expected.to contain_concat__fragment('rspec.example.com-ssl').with_content(%r{^\s*SSLHonorCipherOrder\s+Off$}) }
+          end
+          context 'ssl_honorcipherorder false' do
+            let :params do
+              super().merge({ 'ssl_honorcipherorder' => false })
+            end
+
+            it { is_expected.to compile }
+            it { is_expected.to contain_concat__fragment('rspec.example.com-ssl').with_content(%r{^\s*SSLHonorCipherOrder\s+Off$}) }
+          end
         end
         describe 'access logs' do
           context 'single log file' do

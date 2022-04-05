@@ -36,6 +36,8 @@ class apache::params inherits ::apache::version {
 
   $modsec_audit_log_parts = 'ABIJDEFHZ'
   $modsec_audit_log_type = 'Serial'
+  $modsec_custom_rules = false
+  $modsec_custom_rules_set = undef
 
   # no client certs should be trusted for auth by default.
   $ssl_certs_dir          = undef
@@ -61,6 +63,7 @@ class apache::params inherits ::apache::version {
     $server_root          = "${httpd_root}/etc/httpd"
     $conf_dir             = "${httpd_dir}/conf"
     $confd_dir            = "${httpd_dir}/conf.d"
+    $puppet_ssl_dir       = "${httpd_dir}/puppet_ssl"
     $mod_dir              = $facts['operatingsystemmajrelease'] ? {
       '7'     => "${httpd_dir}/conf.modules.d",
       default => "${httpd_dir}/conf.d",
@@ -167,15 +170,15 @@ class apache::params inherits ::apache::version {
     $server_root          = '/etc/httpd'
     $conf_dir             = "${httpd_dir}/conf"
     $confd_dir            = "${httpd_dir}/conf.d"
+    $puppet_ssl_dir       = "${httpd_dir}/puppet_ssl"
     $conf_enabled         = undef
     if $::operatingsystem =~ /^[Aa]mazon$/ and $::operatingsystemmajrelease == '2' {
       # Amazon Linux 2 uses the /conf.modules.d/ dir
       $mod_dir            = "${httpd_dir}/conf.modules.d"
     } else {
       $mod_dir              = $facts['operatingsystemmajrelease'] ? {
-        '7'     => "${httpd_dir}/conf.modules.d",
-        '8'     => "${httpd_dir}/conf.modules.d",
-        default => "${httpd_dir}/conf.d",
+        '6'     => "${httpd_dir}/conf.d",
+        default => "${httpd_dir}/conf.modules.d",
       }
     }
     $mod_enable_dir       = undef
@@ -212,9 +215,8 @@ class apache::params inherits ::apache::version {
       'auth_mellon'           => 'mod_auth_mellon',
       'auth_openidc'          => 'mod_auth_openidc',
       'authnz_ldap'           => $facts['operatingsystemmajrelease'] ? {
-        '7'     => 'mod_ldap',
-        '8'     => 'mod_ldap',
-        default => 'mod_authz_ldap',
+        '6'     => 'mod_authz_ldap',
+        default => 'mod_ldap',
       },
       'authnz_pam'            => 'mod_authnz_pam',
       'fastcgi'               => $facts['operatingsystemmajrelease'] ? {
@@ -253,8 +255,9 @@ class apache::params inherits ::apache::version {
       'shibboleth'            => 'shibboleth',
       'ssl'                   => 'mod_ssl',
       'wsgi'                  => $facts['operatingsystemmajrelease'] ? {
-        '8'     => 'python3-mod_wsgi', # RedHat8
-        default => 'mod_wsgi',         # RedHat5, RedHat6, RedHat7
+        '6'     => 'mod_wsgi',         # RedHat6
+        '7'     => 'mod_wsgi',         # RedHat7
+        default => 'python3-mod_wsgi', # RedHat8+
       },
       'dav_svn'               => 'mod_dav_svn',
       'suphp'                 => 'mod_suphp',
@@ -265,8 +268,9 @@ class apache::params inherits ::apache::version {
     $mod_libs             = {
       'nss' => 'libmodnss.so',
       'wsgi'                  => $facts['operatingsystemmajrelease'] ? {
-        '8'     => 'mod_wsgi_python3.so',
-        default => 'mod_wsgi.so',
+        '6'     => 'mod_wsgi.so',
+        '7'     => 'mod_wsgi.so',
+        default => 'mod_wsgi_python3.so',
       },
     }
     $conf_template        = 'apache/httpd.conf.erb'
@@ -279,14 +283,12 @@ class apache::params inherits ::apache::version {
     $mime_types_config    = '/etc/mime.types'
     $docroot              = '/var/www/html'
     $alias_icons_path     = $facts['operatingsystemmajrelease'] ? {
-      '7'     => '/usr/share/httpd/icons',
-      '8'     => '/usr/share/httpd/icons',
-      default => '/var/www/icons',
+      '6'     => '/var/www/icons',
+      default => '/usr/share/httpd/icons',
     }
     $error_documents_path = $facts['operatingsystemmajrelease'] ? {
-      '7'     => '/usr/share/httpd/error',
-      '8'     => '/usr/share/httpd/error',
-      default => '/var/www/error'
+      '6'     => '/var/www/error',
+      default => '/usr/share/httpd/error',
     }
     if $::osfamily == 'RedHat' {
       $wsgi_socket_prefix = '/var/run/wsgi'
@@ -341,6 +343,7 @@ class apache::params inherits ::apache::version {
     $confd_dir           = "${httpd_dir}/conf.d"
     # Overwrite conf_enabled causes errors with Shibboleth when enabled on Ubuntu 18.04
     $conf_enabled        = undef #"${httpd_dir}/conf-enabled.d"
+    $puppet_ssl_dir      = "${httpd_dir}/puppet_ssl"
     $mod_dir             = "${httpd_dir}/mods-available"
     $mod_enable_dir      = "${httpd_dir}/mods-enabled"
     $vhost_dir           = "${httpd_dir}/sites-available"
@@ -358,41 +361,9 @@ class apache::params inherits ::apache::version {
     $suphp_addhandler    = 'x-httpd-php'
     $suphp_engine        = 'off'
     $suphp_configpath    = '/etc/php5/apache2'
-    if ($::operatingsystem == 'Ubuntu' and versioncmp($::operatingsystemrelease, '16.04') < 0) or ($::operatingsystem == 'Debian' and versioncmp($::operatingsystemrelease, '9') < 0) {
-      # Only the major version is used here
-      $php_version = '5'
-      $mod_packages = {
-        'auth_cas'              => 'libapache2-mod-auth-cas',
-        'auth_kerb'             => 'libapache2-mod-auth-kerb',
-        'auth_openidc'          => 'libapache2-mod-auth-openidc',
-        'auth_gssapi'           => 'libapache2-mod-auth-gssapi',
-        'auth_mellon'           => 'libapache2-mod-auth-mellon',
-        'authnz_pam'            => 'libapache2-mod-authnz-pam',
-        'dav_svn'               => 'libapache2-svn',
-        'fastcgi'               => 'libapache2-mod-fastcgi',
-        'fcgid'                 => 'libapache2-mod-fcgid',
-        'geoip'                 => 'libapache2-mod-geoip',
-        'intercept_form_submit' => 'libapache2-mod-intercept-form-submit',
-        'jk'                    => 'libapache2-mod-jk',
-        'lookup_identity'       => 'libapache2-mod-lookup-identity',
-        'nss'                   => 'libapache2-mod-nss',
-        'pagespeed'             => 'mod-pagespeed-stable',
-        'passenger'             => 'libapache2-mod-passenger',
-        'perl'                  => 'libapache2-mod-perl2',
-        'phpXXX'                => 'libapache2-mod-phpXXX',
-        'proxy_html'            => 'libapache2-mod-proxy-html',
-        'python'                => 'libapache2-mod-python',
-        'rpaf'                  => 'libapache2-mod-rpaf',
-        'security'              => 'libapache2-modsecurity',
-        'shib2'                 => 'libapache2-mod-shib2',
-        'suphp'                 => 'libapache2-mod-suphp',
-        'wsgi'                  => 'libapache2-mod-wsgi',
-        'xsendfile'             => 'libapache2-mod-xsendfile',
-      }
-    } else {
+    if ($::operatingsystem == 'Ubuntu') or ($::operatingsystem == 'Debian' and versioncmp($::operatingsystemmajrelease, '11') < 0) {
       $php_version = $facts['operatingsystemmajrelease'] ? {
         '9'     => '7.0', # Debian Stretch
-        '16.04' => '7.0', # Ubuntu Xenial
         '10'    => '7.3', # Debian Buster
         '20.04' => '7.4', # Ubuntu Foccal Fossal
         default => '7.2', # Ubuntu Bionic, Cosmic and Disco
@@ -424,13 +395,43 @@ class apache::params inherits ::apache::version {
         'wsgi'                  => 'libapache2-mod-wsgi',
         'xsendfile'             => 'libapache2-mod-xsendfile',
       }
+    } else {
+      $php_version = $facts['operatingsystemmajrelease'] ? {
+        default => '7.4', # Debian Bullseye
+      }
+      $mod_packages = {
+        'apreq2'                => 'libapache2-mod-apreq2',
+        'auth_cas'              => 'libapache2-mod-auth-cas',
+        'auth_kerb'             => 'libapache2-mod-auth-kerb',
+        'auth_openidc'          => 'libapache2-mod-auth-openidc',
+        'auth_gssapi'           => 'libapache2-mod-auth-gssapi',
+        'auth_mellon'           => 'libapache2-mod-auth-mellon',
+        'authnz_pam'            => 'libapache2-mod-authnz-pam',
+        'dav_svn'               => 'libapache2-mod-svn',
+        'fastcgi'               => 'libapache2-mod-fastcgi',
+        'fcgid'                 => 'libapache2-mod-fcgid',
+        'geoip'                 => 'libapache2-mod-geoip',
+        'intercept_form_submit' => 'libapache2-mod-intercept-form-submit',
+        'jk'                    => 'libapache2-mod-jk',
+        'lookup_identity'       => 'libapache2-mod-lookup-identity',
+        'nss'                   => 'libapache2-mod-nss',
+        'pagespeed'             => 'mod-pagespeed-stable',
+        'passenger'             => 'libapache2-mod-passenger',
+        'perl'                  => 'libapache2-mod-perl2',
+        'phpXXX'                => 'libapache2-mod-phpXXX',
+        'python'                => 'libapache2-mod-python',
+        'rpaf'                  => 'libapache2-mod-rpaf',
+        'security'              => 'libapache2-mod-security2',
+        'shib2'                 => 'libapache2-mod-shib',
+        'wsgi'                  => 'libapache2-mod-wsgi-py3',
+        'xsendfile'             => 'libapache2-mod-xsendfile',
+      }
     }
+
     $error_log           = 'error.log'
     $scriptalias         = '/usr/lib/cgi-bin'
     $access_log_file     = 'access.log'
-    if $::osfamily == 'Debian' and versioncmp($::operatingsystemrelease, '8') < 0 {
-      $shib2_lib = 'mod_shib_22.so'
-    } elsif ($::operatingsystem == 'Ubuntu' and versioncmp($::operatingsystemrelease, '19.04') < 0) or ($::operatingsystem == 'Debian' and versioncmp($::operatingsystemrelease, '10') < 0) {
+    if ($::operatingsystem == 'Ubuntu' and versioncmp($::operatingsystemrelease, '19.04') < 0) or ($::operatingsystem == 'Debian' and versioncmp($::operatingsystemrelease, '10') < 0) {
       $shib2_lib = 'mod_shib2.so'
     } else {
       $shib2_lib = 'mod_shib.so'
@@ -446,11 +447,7 @@ class apache::params inherits ::apache::version {
     $fastcgi_lib_path       = '/var/lib/apache2/fastcgi'
     $mime_support_package = 'mime-support'
     $mime_types_config    = '/etc/mime.types'
-    if ($::operatingsystem == 'Ubuntu' and versioncmp($::operatingsystemrelease, '13.10') >= 0) or ($::operatingsystem == 'Debian' and versioncmp($::operatingsystemrelease, '8') >= 0) {
-      $docroot              = '/var/www/html'
-    } else {
-      $docroot              = '/var/www'
-    }
+    $docroot              = '/var/www/html'
     $cas_cookie_path      = '/var/cache/apache2/mod_auth_cas/'
     $mellon_lock_file     = undef
     $mellon_cache_size    = undef
@@ -462,59 +459,30 @@ class apache::params inherits ::apache::version {
     $secpcrematchlimit = 1500
     $secpcrematchlimitrecursion = 1500
     $modsec_secruleengine = 'On'
-    if ($::operatingsystem == 'Debian' and versioncmp($::operatingsystemrelease, '9') >= 0) or ($::operatingsystem == 'Ubuntu' and versioncmp($::operatingsystemrelease, '18.04') >= 0) {
-      $modsec_default_rules = [
-        'crawlers-user-agents.data',
-        'iis-errors.data',
-        'java-code-leakages.data',
-        'java-errors.data',
-        'lfi-os-files.data',
-        'php-config-directives.data',
-        'php-errors.data',
-        'php-function-names-933150.data',
-        'php-function-names-933151.data',
-        'php-variables.data',
-        'restricted-files.data',
-        'scanners-headers.data',
-        'scanners-urls.data',
-        'scanners-user-agents.data',
-        'scripting-user-agents.data',
-        'sql-errors.data',
-        'sql-function-names.data',
-        'unix-shell.data',
-        'windows-powershell-commands.data',
-      ]
-    } else {
-      $modsec_default_rules = [
-        'base_rules/modsecurity_35_bad_robots.data',
-        'base_rules/modsecurity_35_scanners.data',
-        'base_rules/modsecurity_40_generic_attacks.data',
-        'base_rules/modsecurity_50_outbound.data',
-        'base_rules/modsecurity_50_outbound_malware.data',
-        'base_rules/modsecurity_crs_20_protocol_violations.conf',
-        'base_rules/modsecurity_crs_21_protocol_anomalies.conf',
-        'base_rules/modsecurity_crs_23_request_limits.conf',
-        'base_rules/modsecurity_crs_30_http_policy.conf',
-        'base_rules/modsecurity_crs_35_bad_robots.conf',
-        'base_rules/modsecurity_crs_40_generic_attacks.conf',
-        'base_rules/modsecurity_crs_41_sql_injection_attacks.conf',
-        'base_rules/modsecurity_crs_41_xss_attacks.conf',
-        'base_rules/modsecurity_crs_42_tight_security.conf',
-        'base_rules/modsecurity_crs_45_trojans.conf',
-        'base_rules/modsecurity_crs_47_common_exceptions.conf',
-        'base_rules/modsecurity_crs_49_inbound_blocking.conf',
-        'base_rules/modsecurity_crs_50_outbound.conf',
-        'base_rules/modsecurity_crs_59_outbound_blocking.conf',
-        'base_rules/modsecurity_crs_60_correlation.conf',
-      ]
-    }
+    $modsec_default_rules = [
+      'crawlers-user-agents.data',
+      'iis-errors.data',
+      'java-code-leakages.data',
+      'java-errors.data',
+      'lfi-os-files.data',
+      'php-config-directives.data',
+      'php-errors.data',
+      'php-function-names-933150.data',
+      'php-function-names-933151.data',
+      'php-variables.data',
+      'restricted-files.data',
+      'scanners-headers.data',
+      'scanners-urls.data',
+      'scanners-user-agents.data',
+      'scripting-user-agents.data',
+      'sql-errors.data',
+      'sql-function-names.data',
+      'unix-shell.data',
+      'windows-powershell-commands.data',
+    ]
     $alias_icons_path     = '/usr/share/apache2/icons'
     $error_documents_path = '/usr/share/apache2/error'
-    if ($::operatingsystem == 'Ubuntu' and versioncmp($::operatingsystemrelease, '13.10') >= 0) or ($::operatingsystem == 'Debian' and versioncmp($::operatingsystemrelease, '8') >= 0) {
-      $dev_packages        = ['libaprutil1-dev', 'libapr1-dev', 'apache2-dev']
-    } else {
-      $dev_packages        = ['libaprutil1-dev', 'libapr1-dev', 'apache2-prefork-dev']
-    }
+    $dev_packages        = ['libaprutil1-dev', 'libapr1-dev', 'apache2-dev']
 
     #
     # Passenger-specific settings
@@ -522,16 +490,9 @@ class apache::params inherits ::apache::version {
 
     $passenger_conf_file         = 'passenger.conf'
     $passenger_conf_package_file = undef
-
-    if ($::operatingsystem == 'Ubuntu' and versioncmp($::operatingsystemrelease, '14.04') < 0) or ($::operatingsystem == 'Debian' and versioncmp($::operatingsystemrelease, '8') < 0) {
-      $passenger_root         = '/usr'
-      $passenger_ruby         = '/usr/bin/ruby'
-      $passenger_default_ruby = undef
-    } else {
-      $passenger_root         = '/usr/lib/ruby/vendor_ruby/phusion_passenger/locations.ini'
-      $passenger_ruby         = undef
-      $passenger_default_ruby = '/usr/bin/ruby'
-    }
+    $passenger_root         = '/usr/lib/ruby/vendor_ruby/phusion_passenger/locations.ini'
+    $passenger_ruby         = undef
+    $passenger_default_ruby = '/usr/bin/ruby'
     $wsgi_socket_prefix = undef
   } elsif $::osfamily == 'FreeBSD' {
     $user             = 'www'
@@ -544,6 +505,7 @@ class apache::params inherits ::apache::version {
     $conf_dir         = $httpd_dir
     $confd_dir        = "${httpd_dir}/Includes"
     $conf_enabled     = undef
+    $puppet_ssl_dir   = "${httpd_dir}/puppet_ssl"
     $mod_dir          = "${httpd_dir}/Modules"
     $mod_enable_dir   = undef
     $vhost_dir        = "${httpd_dir}/Vhosts"
@@ -617,6 +579,7 @@ class apache::params inherits ::apache::version {
     $conf_dir         = $httpd_dir
     $confd_dir        = "${httpd_dir}/conf.d"
     $conf_enabled     = undef
+    $puppet_ssl_dir   = "${httpd_dir}/puppet_ssl"
     $mod_dir          = "${httpd_dir}/modules.d"
     $mod_enable_dir   = undef
     $vhost_dir        = "${httpd_dir}/vhosts.d"
@@ -687,6 +650,7 @@ class apache::params inherits ::apache::version {
     $conf_dir            = $httpd_dir
     $confd_dir           = "${httpd_dir}/conf.d"
     $conf_enabled        = undef
+    $puppet_ssl_dir      = "${httpd_dir}/puppet_ssl"
     $mod_dir             = "${httpd_dir}/mods-available"
     $mod_enable_dir      = "${httpd_dir}/mods-enabled"
     $vhost_dir           = "${httpd_dir}/sites-available"
